@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/python3
 
 import argparse
 import os
@@ -66,9 +66,14 @@ def main():
 		action='store_true', help='additional output')
 	parser.add_argument('-r', '--recursive',
 		action='store_true', help='Search directories recursively.  If this is option is not enabled, only the names of subdirectories will be searched.')
+	parser.add_argument('-R', '--regex-options', nargs='+', default=[], 
+		help='Additional regular expression options.')
 
 	args = parser.parse_args()
-	pattern = re.compile(args.term)
+	options = 0
+	for op in args.regex_options:
+		options |= getattr(re, op.upper())
+	pattern = re.compile(args.term, options)
 	counts = {'file':0, 'name':0}
 	beg = time()
 	for place in args.search:		
