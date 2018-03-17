@@ -13,7 +13,7 @@ def _denied(path): print('Permission denied: %s' % path.absolute())
 def _namecheck(path, search):
 	name = os.fsencode(path.name)
 	matches = search.findall(name)
-	if matches: yield 'name', path.absolute(), len(matches)
+	if matches: yield 'name', path, len(matches)
 
 def _filecheck(path, search, verbose):
 	try:
@@ -21,7 +21,7 @@ def _filecheck(path, search, verbose):
 			 mmap(f.fileno(), 0, prot=PROT_READ) as m:
 
 			matches = search.findall(m)
-			if matches: yield 'file', path.absolute(), len(matches)
+			if matches: yield 'file', path, len(matches)
 	except PermissionError:
 		if verbose: _denied(path)
 	except Exception as exc:
@@ -59,7 +59,7 @@ def look(origin, search, name=True, content=True, verbose=False, recursive=False
 		yield from _filecheck(origin, search, verbose)
 
 def print_result(kind, path, num):
-	print('In %s: %s %d occurence(s)' % (kind, path, num))
+	print('In %s: %s %d occurence(s)' % (kind, path.absolute(), num))
 
 def print_finished(counts, elapsed):
 	lines = []
