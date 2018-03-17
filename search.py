@@ -1,44 +1,56 @@
-#!/usr/bin/python3
+#!/usr/local/bin/python3
 
 import argparse
 from mmap import mmap, PROT_READ
 import os
+from pathlib import Path
 import re
 import sys
 from time import time
 
-def _denied(path): print('Permission denied: %s' % path)
+def _denied(path): print('Permission denied: %s' % path.absolute())
 
 def _namecheck(path, search):
-	name = os.path.split(path)[-1]
+	name = os.fsencode(path.name)
 	matches = search.findall(name)
-	if matches: yield 'name', path, len(matches)
+	if matches: yield 'name', path.absolute(), len(matches)
 
 def _filecheck(path, search, verbose):
 	try:
-		with open(path, 'rb', os.O_RDONLY) as f, \
+		with path.open('rb', os.O_RDONLY) as f, \
 			 mmap(f.fileno(), 0, prot=PROT_READ) as m:
 
 			matches = search.findall(m)
-			if matches: yield 'file', path, len(matches)
+			if matches: yield 'file', path.absolute(), len(matches)
 	except PermissionError:
 		if verbose: _denied(path)
 	except Exception as exc:
 		if verbose: 
 			print(
 				'Error opening file: %s: %s: %s' % \
-				(path, exc.__class__.__name__, str(exc))
+				(path.absolute(), exc.__class__.__name__, str(exc))
 			)
 
 def look(origin, search, name=True, content=True, verbose=False, recursive=False):
-	if name: yield from _namecheck(origin, search)
-	if os.path.isdir(origin):
+	if not isinstance(origin, Path):
+		origin = Path(origin)
+
+	if name: 
+		yield from _namecheck(origin, search)
+
+	if origin.is_dir():
 		try:
-			for fname in os.listdir(origin):
-				path = os.path.join(origin, fname)
-				isdir = os.path.isdir(path)
-				if (isdir and recursive) or os.path.isfile(path): 
-					yield from look(os.path.join(origin, fname), search, name, content, verbose, recursive)
+			for path in origin.iterdir():
+				isdir = path.is_dir()
+				if (isdir and recursive) or path.is_file(): 
+					yield from look(
+						origin=path, 
+						search=search, 
+						name=name, 
+						content=content, 
+						verbose=verbose, 
+						recursive=recursive
+					)
 				elif (isdir and name):
 					yield from _namecheck(path, search)
 		except PermissionError: 
@@ -76,16 +88,14 @@ def main():
 		help='Additional regular expression options.')
 
 	args = parser.parse_args()
-<<<<<<< HEAD
-	pattern = re.compile(args.term.encode())
-=======
+
 	options = 0
 	for op in args.regex_options:
 		options |= getattr(re, op.upper())
-	pattern = re.compile(args.term, options)
->>>>>>> 218c4b3d24222df3a30ca5246b30ca1453d20c13
+	pattern = re.compile(args.term.encode(), options)
 	counts = {'file':0, 'name':0}
 	beg = time()
+
 	for place in args.search:		
 		g = lambda names, files: look(place, pattern, names, files, args.verbose, args.recursive)
 		gen = g(args.names, args.files) if (args.names or args.files) else g(True, True)
