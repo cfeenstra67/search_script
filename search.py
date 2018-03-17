@@ -1,6 +1,7 @@
 #!/usr/local/bin/python3
 
 import argparse
+from mmap import mmap, PROT_READ
 import os
 import re
 import sys
@@ -15,14 +16,19 @@ def _namecheck(path, search):
 
 def _filecheck(path, search, verbose):
 	try:
-		with open(path) as f:
-			full = f.read()
-			matches = search.findall(full)
+		with open(path, 'rb', os.O_RDONLY) as f, \
+			 mmap(f.fileno(), 0, prot=PROT_READ) as m:
+
+			matches = search.findall(m)
 			if matches: yield 'file', path, len(matches)
 	except PermissionError:
 		if verbose: _denied(path)
-	except:
-		if verbose: print('Error opening file: %s' % path)
+	except Exception as exc:
+		if verbose: 
+			print(
+				'Error opening file: %s: %s: %s' % \
+				(path, exc.__class__.__name__, str(exc))
+			)
 
 def look(origin, search, name=True, content=True, verbose=False, recursive=False):
 	if name: yield from _namecheck(origin, search)
@@ -36,12 +42,13 @@ def look(origin, search, name=True, content=True, verbose=False, recursive=False
 				elif (isdir and name):
 					yield from _namecheck(path, search)
 		except PermissionError: 
+			raise
 			if verbose: _denied(origin)
 	elif content:
 		yield from _filecheck(origin, search, verbose)
 
 def print_result(kind, path, num):
-	print('In %s: %s, %d occurence(s)' % (kind, path, num))
+	print('In %s: %s %d occurence(s)' % (kind, path, num))
 
 def print_finished(counts, elapsed):
 	lines = []
@@ -54,7 +61,7 @@ def print_finished(counts, elapsed):
 def main():
 	parser = argparse.ArgumentParser()
 	
-	parser.add_argument('term', 
+	parser.add_argument('term',
 		help='search term (regular expressions supported). Double escape character required if used.')
 	parser.add_argument('-s', '--search', 
 		nargs='*', default=[os.getcwd()], help='specify files or directories to search.  Use -r option to search directories recursively.')
@@ -68,7 +75,7 @@ def main():
 		action='store_true', help='Search directories recursively.  If this is option is not enabled, only the names of subdirectories will be searched.')
 
 	args = parser.parse_args()
-	pattern = re.compile(args.term)
+	pattern = re.compile(args.term.encode())
 	counts = {'file':0, 'name':0}
 	beg = time()
 	for place in args.search:		
