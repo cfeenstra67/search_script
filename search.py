@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/python3
 
 import argparse
 from mmap import mmap, PROT_READ
@@ -73,9 +73,18 @@ def main():
 		action='store_true', help='additional output')
 	parser.add_argument('-r', '--recursive',
 		action='store_true', help='Search directories recursively.  If this is option is not enabled, only the names of subdirectories will be searched.')
+	parser.add_argument('-R', '--regex-options', nargs='+', default=[], 
+		help='Additional regular expression options.')
 
 	args = parser.parse_args()
+<<<<<<< HEAD
 	pattern = re.compile(args.term.encode())
+=======
+	options = 0
+	for op in args.regex_options:
+		options |= getattr(re, op.upper())
+	pattern = re.compile(args.term, options)
+>>>>>>> 218c4b3d24222df3a30ca5246b30ca1453d20c13
 	counts = {'file':0, 'name':0}
 	beg = time()
 	for place in args.search:		
