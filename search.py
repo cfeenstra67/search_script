@@ -42,7 +42,6 @@ def look(origin, search, name=True, content=True, verbose=False, recursive=False
 				elif (isdir and name):
 					yield from _namecheck(path, search)
 		except PermissionError: 
-			raise
 			if verbose: _denied(origin)
 	elif content:
 		yield from _filecheck(origin, search, verbose)
