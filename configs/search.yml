@@ -1,0 +1,5 @@
+ignore:
+  - "venv"
+  - "*.pyc"
+  - "__pycache__"
+  - ".git"

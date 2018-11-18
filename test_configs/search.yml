@@ -1,3 +1,0 @@
-ignore:
-  - glob: "*.pyc"
-  - glob: "*.md"

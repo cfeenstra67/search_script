@@ -1,23 +1,80 @@
+from contextlib import contextmanager
+from functools import partial
 import logging
 import mmap
 import os
 from pathlib import Path
+import queue
+import threading
 import time
+
+
+def crawl(
+	origin, 
+	recurse_func=lambda x: True, 
+	yield_dirs=True,
+	max_depth=None,
+	_depth=0
+):
+	if not isinstance(origin, Path):
+		origin = Path(origin)
+
+	if not origin.exists():
+		return
+
+	isfile = origin.is_file()
+
+	if yield_dirs or isfile:
+		yield origin
+
+	if (
+		not isfile 
+		and recurse_func(str(origin)) 
+		and (
+			max_depth is None
+			or _depth <= max_depth
+		)
+
+	):
+		for path in origin.iterdir():
+			yield from crawl(
+				path, recurse_func, yield_dirs, 
+				max_depth=max_depth, 
+				_depth=_depth + 1
+			)
 
 
 class FileSearcher(object):
 
 	def __init__(
 		self, config, logger,
-		max_depth, names, content
+		max_depth, names, content,
+		pool_size=16
 	):
 		self.config = config
 		self.logger = logger
 		self.max_depth = max_depth
 		self.names = names
 		self.content = content
+		self.pool_size = pool_size
+		self.threads = []
+		self.out_thread = None
+
+		self.crawler = partial(
+			crawl,
+			recurse_func=self.config.should_search,
+			yield_dirs=True,
+			max_depth=max_depth
+		)
+
+		self.file_queue = queue.Queue()
+		self.out_queue = queue.Queue()
+
+		self.reset_stats()
+
+	def reset_stats(self):
 		self.stats = {'name': 0, 'file': 0}
-		self.start = 0
+		self.start = time.time()
 
 	def access_denied(self, path):
 		self.logger.info2('Permission denied: %s' % path.absolute())
@@ -41,47 +98,94 @@ class FileSearcher(object):
 			self.logger.info2(
 				'Error opening file: %s: %s: %s',
 				path.absolute(), exc.__class__.__name__, str(exc)
-			)
-
-	def search_dir(self, path, term, depth):
-		try:
-			for path in path.iterdir():
-				yield from self._search(path, term, depth + 1)
-		except PermissionError:
-			self.access_denied(path)		
+			)	
 
 	def check_name(self, path, term):
 		name = os.fsencode(path.name)
 		matches = term.findall(name)
 		return 'name', path, len(matches)
 
-	def _search(self, origin, term, depth=0):
-
-		if not isinstance(origin, Path):
-			origin = Path(origin).absolute()
-
-		if not self.config.should_search(str(origin)):
-			self.logger.debug('Ignoring path due to configuration: %s' % origin.absolute())
+	def process_path(self, path, term):
+		if not self.config.should_search(str(path)):
+			self.logger.debug('Ignoring path due to configuration: %s' % path.absolute())
 			return
 
 		if self.names:
-			yield self.check_name(origin, term)
+			self.out_queue.put(self.check_name(origin, term))
 
-		isfile, isdir = origin.is_file(), origin.is_dir()
+		isfile = path.is_file()
 
-		if self.max_depth is not None:
-			if depth > self.max_depth and isdir:
-				return
-			elif depth > (self.max_depth + 1) and isfile:
-				return
+		if path.is_file() and self.content:
+			self.out_queue.put(self.search_file(path, term))
 
-		if isfile and self.content:
-			res = self.search_file(origin, term)
-			if res is not None:
-				yield res
+	def server(self, que, func, timeout=.1):
 
-		if isdir:
-			yield from self.search_dir(origin, term, depth)
+		def serve():
+			while self.running:
+				try:
+					tup = que.get(timeout=timeout)
+				except queue.Empty:
+					continue
+				else:
+					func(*tup)
+					que.task_done()
+
+		return serve
+
+	def clear_queues(self):
+		with self.file_queue.mutex:
+			self.file_queue.queue.clear()
+
+		with self.out_queue.mutex:
+			self.out_queue.queue.clear()
+
+	def make_thread(self, target, daemon=True, start=True):
+		t = threading.Thread(target=target, daemon=True)
+		if start:
+			t.start()
+		return t
+
+	def init_pool(self, join=True):
+		if join:
+			self.stop_pool()
+
+		self.threads = []
+		self.running = True
+
+		self.clear_queues()
+
+		fileserver = self.server(self.file_queue, self.process_path)
+
+		for _ in range(self.pool_size):
+			self.threads.append(self.make_thread(fileserver))
+
+		outserver = self.server(self.out_queue, self.process_result)
+		self.out_thread = self.make_thread(outserver)
+
+	def stop_pool(self):
+		self.running = False
+		for thread in self.threads:
+			thread.join()
+		if self.out_thread is not None:
+			self.out_thread.join()
+
+	@property
+	@contextmanager
+	def pool_context(self):
+		self.init_pool()
+		try:
+			yield
+		finally:
+			self.stop_pool()
+
+	@property
+	@contextmanager
+	def search_context(self):
+		self.reset_stats()
+		try:
+			yield
+		finally:
+			self.print_finished()
 
 	def process_result(self, kind, path, num):
 		lvl = logging.DEBUG if num == 0 else logging.INFO1
@@ -91,7 +195,7 @@ class FileSearcher(object):
 
 	def print_finished(self):
 		lines = []
-		lines.append('\nSearch Completed.')
+		lines.append('\nSearch Completed.') 
 
 		for kind, count in self.stats.items():
 			lines.append('In %s(s): %d results' % (kind, count))
@@ -101,10 +205,12 @@ class FileSearcher(object):
 		self.logger.info2('\n'.join(lines))
 
 	def search(self, origins, term):
-		self.stats = {}
-		self.start = time.time()
-		self.logger.info1('')
-		for origin in origins:
-			for kind, path, num in self._search(origin, term):
-				self.process_result(kind, path, num)
-		self.print_finished()
+		self.reset_stats()
+
+		with self.pool_context, self.search_context:
+			for origin in origins:
+				for path in self.crawler(origin):
+					self.file_queue.put((path, term))
+
+			self.file_queue.join()
+			self.out_queue.join()
