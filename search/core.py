@@ -58,7 +58,6 @@ class FileSearcher(object):
 		self.content = content
 		self.pool_size = pool_size
 		self.threads = []
-		self.out_thread = None
 
 		self.crawler = partial(
 			crawl,
@@ -68,7 +67,6 @@ class FileSearcher(object):
 		)
 
 		self.file_queue = queue.Queue()
-		self.out_queue = queue.Queue()
 
 		self.reset_stats()
 
@@ -105,18 +103,22 @@ class FileSearcher(object):
 		matches = term.findall(name)
 		return 'name', path, len(matches)
 
-	def process_path(self, path, term):
+	def search_path(self, path, term):
 		if not self.config.should_search(str(path)):
 			self.logger.debug('Ignoring path due to configuration: %s' % path.absolute())
 			return
 
 		if self.names:
-			self.out_queue.put(self.check_name(origin, term))
+			yield self.check_name(origin, term)
 
 		isfile = path.is_file()
 
 		if path.is_file() and self.content:
-			self.out_queue.put(self.search_file(path, term))
+			yield self.search_file(path, term)
+
+	def process_path(self, path, term):
+		for tup in self.search_path(path, term):
+			self.process_result(*tup)
 
 	def server(self, que, func, timeout=.1):
 
@@ -135,9 +137,6 @@ class FileSearcher(object):
 	def clear_queues(self):
 		with self.file_queue.mutex:
 			self.file_queue.queue.clear()
-
-		with self.out_queue.mutex:
-			self.out_queue.queue.clear()
 
 	def make_thread(self, target, daemon=True, start=True):
 		t = threading.Thread(target=target, daemon=True)
@@ -159,15 +158,10 @@ class FileSearcher(object):
 		for _ in range(self.pool_size):
 			self.threads.append(self.make_thread(fileserver))
 
-		outserver = self.server(self.out_queue, self.process_result)
-		self.out_thread = self.make_thread(outserver)
-
 	def stop_pool(self):
 		self.running = False
 		for thread in self.threads:
 			thread.join()
-		if self.out_thread is not None:
-			self.out_thread.join()
 
 	@property
 	@contextmanager
@@ -213,4 +207,3 @@ class FileSearcher(object):
 					self.file_queue.put((path, term))
 
 			self.file_queue.join()
-			self.out_queue.join()
