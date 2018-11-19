@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 from functools import partial
+from itertools import chain
 import logging
 import mmap
+from multiprocessing.pool import ThreadPool
 import os
 from pathlib import Path
 import queue
@@ -57,7 +59,6 @@ class FileSearcher(object):
 		self.names = names
 		self.content = content
 		self.pool_size = pool_size
-		self.threads = []
 
 		self.crawler = partial(
 			crawl,
@@ -65,8 +66,6 @@ class FileSearcher(object):
 			yield_dirs=True,
 			max_depth=max_depth
 		)
-
-		self.file_queue = queue.Queue()
 
 		self.reset_stats()
 
@@ -120,58 +119,6 @@ class FileSearcher(object):
 		for tup in self.search_path(path, term):
 			self.process_result(*tup)
 
-	def server(self, que, func, timeout=.1):
-
-		def serve():
-			while self.running:
-				try:
-					tup = que.get(timeout=timeout)
-				except queue.Empty:
-					continue
-				else:
-					func(*tup)
-					que.task_done()
-
-		return serve
-
-	def clear_queues(self):
-		with self.file_queue.mutex:
-			self.file_queue.queue.clear()
-
-	def make_thread(self, target, daemon=True, start=True):
-		t = threading.Thread(target=target, daemon=True)
-		if start:
-			t.start()
-		return t
-
-	def init_pool(self, join=True):
-		if join:
-			self.stop_pool()
-
-		self.threads = []
-		self.running = True
-
-		self.clear_queues()
-
-		fileserver = self.server(self.file_queue, self.process_path)
-
-		for _ in range(self.pool_size):
-			self.threads.append(self.make_thread(fileserver))
-
-	def stop_pool(self):
-		self.running = False
-		for thread in self.threads:
-			thread.join()
-
-	@property
-	@contextmanager
-	def pool_context(self):
-		self.init_pool()
-		try:
-			yield
-		finally:
-			self.stop_pool()
-
 	@property
 	@contextmanager
 	def search_context(self):
@@ -198,12 +145,14 @@ class FileSearcher(object):
 
 		self.logger.info2('\n'.join(lines))
 
-	def search(self, origins, term):
-		self.reset_stats()
+	def search(self, origins, term, n_threads=4):
 
-		with self.pool_context, self.search_context:
-			for origin in origins:
-				for path in self.crawler(origin):
-					self.file_queue.put((path, term))
+		mapper = map if n_threads is None else ThreadPool(n_threads).imap
 
-			self.file_queue.join()
+		paths = map(self.crawler, origins)
+		paths = chain.from_iterable(paths)
+
+		proc_path = partial(self.process_path, term=term)
+
+		for _ in mapper(proc_path, paths):
+			pass
