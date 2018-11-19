@@ -54,6 +54,8 @@ def main(argv=None, logger=None, name='search'):
 			 'subdirectories will be searched. Add a number after this arg to determine max depth')
 	parser.add_argument('-R', '--regex-options', nargs='+', default=[], 
 		help='Additional regular expression options.')
+	parser.add_argument('-t', '--threads', default=4, type=int,
+		help='Number of threads to use')
 
 	args = parser.parse_args(argv)
 
@@ -79,6 +81,6 @@ def main(argv=None, logger=None, name='search'):
 
 	searcher = FileSearcher(conf, logger, args.recurse, names, content)
 
-	searcher.search(args.search, pattern)
+	searcher.search(args.search, pattern, n_threads=args.threads)
 
 	return 0
