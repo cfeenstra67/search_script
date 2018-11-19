@@ -154,5 +154,6 @@ class FileSearcher(object):
 
 		proc_path = partial(self.process_path, term=term)
 
-		for _ in mapper(proc_path, paths):
-			pass
+		with self.search_context:
+			for _ in mapper(proc_path, paths):
+				pass
