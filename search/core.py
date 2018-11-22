@@ -108,7 +108,7 @@ class FileSearcher(object):
 			return
 
 		if self.names:
-			yield self.check_name(origin, term)
+			yield self.check_name(path, term)
 
 		isfile = path.is_file()
 
