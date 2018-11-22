@@ -19,11 +19,17 @@ def make_logger(name):
 	logger.setLevel(logging.INFO1)
 	return logger
 
-def make_regex(pattern_str, ops):
+def regex_options(ops):
 	options = 0
 	for op in ops:
-		options |= getattr(re, op.upper())
-	pattern = re.compile(pattern_str, options)
+		if op.isdigit():
+			options |= int(op)
+		else:
+			options |= getattr(re, op.upper(), 0)
+	return options
+
+def make_regex(pattern_str, ops):
+	pattern = re.compile(pattern_str, regex_options(ops))
 	return pattern
 
 def main(argv=None, logger=None, name='search'):
@@ -56,6 +62,12 @@ def main(argv=None, logger=None, name='search'):
 		help='Additional regular expression options.')
 	parser.add_argument('-t', '--threads', default=4, type=int,
 		help='Number of threads to use')
+	parser.add_argument('-e', '--exclude', nargs='*', default=[], type=str,
+		help='Globs to exclude')
+	parser.add_argument('--exclude-regex', nargs='*', default=[], type=str,
+		help='Regexes to exclude')
+	parser.add_argument('--exclude-regex-options', nargs='+', default=[],
+		help='Regular expression options for exclude-regex args')
 
 	args = parser.parse_args(argv)
 
@@ -67,7 +79,18 @@ def main(argv=None, logger=None, name='search'):
 
 	pattern = make_regex(args.term.encode(), args.regex_options)
 
-	valid, conf = load_config()
+	excludes = [
+		{'glob': i} for i in args.exclude
+	] + [
+		{'regex': i, 'options': args.exclude_regex_options} 
+		for i in args.exclude_regex
+	]
+
+	arg_config = {
+		'ignore': excludes,
+	}
+
+	valid, conf = load_config(other=arg_config)
 
 	if not valid:
 		logger.info1(conf)

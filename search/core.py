@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from functools import partial
-from itertools import chain
+from itertools import chain, starmap
 import logging
 import mmap
 from multiprocessing.pool import ThreadPool
@@ -102,7 +102,7 @@ class FileSearcher(object):
 		matches = term.findall(name)
 		return 'name', path, len(matches)
 
-	def search_path(self, path, term):
+	def _search_path(self, path, term):
 		if not self.config.should_search(str(path)):
 			self.logger.debug('Ignoring path due to configuration: %s' % path.absolute())
 			return
@@ -115,9 +115,8 @@ class FileSearcher(object):
 		if path.is_file() and self.content:
 			yield self.search_file(path, term)
 
-	def process_path(self, path, term):
-		for tup in self.search_path(path, term):
-			self.process_result(*tup)
+	def search_path(self, *args, **kwargs):
+		return tuple(self._search_path(*args, **kwargs))
 
 	@property
 	@contextmanager
@@ -152,8 +151,11 @@ class FileSearcher(object):
 		paths = map(self.crawler, origins)
 		paths = chain.from_iterable(paths)
 
-		proc_path = partial(self.process_path, term=term)
+		srch_path = partial(self.search_path, term=term)
+		results = mapper(srch_path, paths)
+		results = chain.from_iterable(results)
+		results = starmap(self.process_result, results)
 
 		with self.search_context:
-			for _ in mapper(proc_path, paths):
+			for _ in results:
 				pass

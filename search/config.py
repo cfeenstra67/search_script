@@ -93,7 +93,7 @@ def regex_matches(*args, options=0):
 				ops |= op
 			else:
 				ops |= getattr(re, op.upper())
-		self.options = ops
+		options = ops
 
 	return bool(re.search(pattern, value, options))
 
@@ -181,13 +181,31 @@ class Configuration(object):
 		_, name = os.path.split(path)
 		return not any(match(name) for match in self.ignore_names)
 
+def merge_configs(conf1, conf2):
+	out = {}
+	s1, s2 = map(set, [conf1, conf2])
+	left, both, right = s1 - s2, s1 & s2, s2 - s1
 
-def load_config(paths=CONFIG_PATHS):
+	for keys, ob in [(left, conf1), (right, conf2)]:
+		for k in keys:
+			out[k] = ob[k]
+
+	for key in both:
+		l, r = conf1[key], conf2[key]
+		l, r = map(lambda x: x if isinstance(x, list) else [x], [l, r])
+		out[key] = l + r
+
+	return out
+
+def load_config(other=None, paths=CONFIG_PATHS):
 	config_path = os.getenv('SEARCH_CONFIG')
 	if config_path is not None:
 		paths = (config_path,) + paths
 
 	config_dict, path = load_config_dict(paths)
+
+	if other is not None:
+		config_dict = merge_configs(config_dict, other)
 
 	config = Configuration(config_dict, path)
 
