@@ -110,8 +110,6 @@ class FileSearcher(object):
 		if self.names:
 			yield self.check_name(path, term)
 
-		isfile = path.is_file()
-
 		if path.is_file() and self.content:
 			yield self.search_file(path, term)
 
